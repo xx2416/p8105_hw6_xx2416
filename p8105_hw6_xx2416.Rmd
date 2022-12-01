@@ -144,4 +144,71 @@ results_victim_sexMale%>%
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 ```
 
+# Problem 3
+
+* load and clean the data.
+```{r}
+birthweight_df<-read.csv("birthweight.csv") %>%
+  janitor::clean_names() %>%
+  mutate(babysex=as.factor(babysex),
+         frace=as.factor(frace),
+         malform=as.factor(malform),
+         mrace=as.factor(mrace))
+
+
+map(birthweight_df,~sum(is.na(.x)))
+```
+This dataset contains 4342 rows and 20 columns, there is no missing data. 
+
+* Build the model
+A article published in `NCBI` did a Community Based Study about `the Factors Affecting Birth Weight of a Newborn` [https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3390317/]. The present study revealed that maternal illiteracy, exposure to passive smoking, late child bearing, shorter inter-pregnancy interval, previous LBW baby, maternal weight, weight gain during pregnancy, PIH, high risk pregnancy and late antenatal registration were the risk factors significantly associated with the birth weight of a newborn. Meanwhile, the race of both parents and the malformation situation are important factors to adjust the model. As such, I include `fincome`, `smoken`, `momage`,`pnumlbw`,`delwt`,`wtgain`,`babysex`, `malform`, `gaweeks`, `mrace`, and `frace`.
+```{r}
+lm(bwt~fincome+smoken+momage+pnumlbw+delwt+wtgain+babysex+malform+gaweeks+mrace+frace,data=birthweight_df) %>% summary()
+```
+Based on the results, the factors including `fincome`, `momage`, `pnumlbw`, `malform`, and `frace` are not significant at the level of 0.05. Hence I decide to delete these variables to make the model more clean and reasonable.
+```{r}
+model_fit1<-lm(bwt~smoken+delwt+wtgain+babysex+gaweeks+mrace,data=birthweight_df)
+
+birthweight_df %>% 
+  modelr::add_residuals(model_fit1) %>% 
+  modelr::add_predictions(model_fit1) %>% 
+  ggplot(aes(x=pred,y=resid))+
+  geom_point(alpha=0.5)+
+  geom_smooth(se = F, color = "red", method = "lm")
+```
+
+* Fit other models and make the comparision in terms of the cross-validated prediction error.
+```{r}
+cv_df<-
+  crossv_mc(birthweight_df,100) %>% 
+  mutate(
+    train=map(train,as_tibble),
+    test=map(train,as_tibble)
+  ) %>% 
+  mutate(
+    model1=map(train,~lm(bwt~smoken+delwt+wtgain+babysex+gaweeks+mrace,data=.x)),
+    model2=map(train,~lm(bwt~gaweeks + blength,data = .x)),
+    model3=map(train,~lm(bwt~bhead + blength + babysex+bhead*blength+bhead*babysex+blength*babysex+bhead * blength * babysex,data=.x))
+  ) %>% 
+  mutate(
+    rmse_model1=map2_dbl(model1,test,~rmse(model = .x,data = .y)),
+    rmse_model2=map2_dbl(model2,test,~rmse(model = .x,data = .y)),
+    rmse_model3=map2_dbl(model3,test,~rmse(model = .x,data = .y))
+  )
+
+cv_df %>% 
+  select(starts_with("rmse")) %>%
+  pivot_longer(
+    everything(),
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) %>% 
+  mutate(model=fct_inorder(model)) %>% 
+  ggplot(aes(x=model,y=rmse))+
+  geom_violin()
+```
+Based on the RSME plot, it shows that model3 is the best model with the lowest `RSME`. The model1 which is build based on the paper clearly needs some improvement. But it makes sense, considering the paper is a in community study in Rural Karnataka, India, and this dataset we used were gathered in American. Model 3 use head circumference, length, sex, and all interactions (including the three-way interaction) between these. In my humble opinion, the model1's con is that the model focus mainly on socialdemographic factors but ingores certain phycical factors which are much more intuitive, such as head circumference and length. 
+
+
 
